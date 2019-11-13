@@ -23,6 +23,7 @@ var (
 )
 
 func TestUnstable(t *testing.T) {
+	app.executionRange = ""
 	incReplicas := app.scale(0, 1)
 
 	if incReplicas != 0 {
@@ -38,6 +39,7 @@ func TestUnstable(t *testing.T) {
 }
 
 func TestScaleUp(t *testing.T) {
+	app.executionRange = ""
 	app.readyWorkers = 1
 	app.replicas = 1
 
@@ -67,9 +69,25 @@ func TestScaleUp(t *testing.T) {
 	}
 }
 
+func TestScaleUpWithWindow(t *testing.T) {
+	app.readyWorkers = 1
+	app.replicas = 1
+	app.executionRange = "12-18"
+
+	incReplicas := app.scale(1, 2)
+
+	// Should increase the workers
+	if incReplicas != -1 {
+		t.Error("Expected -1, got ", incReplicas)
+	}
+	app.executionRange = ""
+}
+
 func TestScaleDown(t *testing.T) {
+	app.executionRange = ""
 	app.readyWorkers = 2
 	app.replicas = 2
+	app.executionRange = ""
 
 	incReplicas := app.scale(2, 1)
 
@@ -89,6 +107,7 @@ func TestScaleDown(t *testing.T) {
 }
 
 func TestMinMax(t *testing.T) {
+	app.executionRange = ""
 	app.readyWorkers = 0
 	app.replicas = 0
 	incReplicas := app.scale(0, 0)
@@ -129,6 +148,7 @@ func TestMinMax(t *testing.T) {
 }
 
 func TestOffset(t *testing.T) {
+	app.executionRange = ""
 	app.readyWorkers = 2
 	app.replicas = 2
 	app.offset = 2
@@ -142,6 +162,7 @@ func TestOffset(t *testing.T) {
 }
 
 func TestStepUp(t *testing.T) {
+	app.executionRange = ""
 	app.offset = 0
 	app.readyWorkers = 2
 	app.replicas = 2
@@ -164,6 +185,7 @@ func TestStepUp(t *testing.T) {
 }
 
 func TestStepDown(t *testing.T) {
+	app.executionRange = ""
 	app.offset = 0
 	app.readyWorkers = 4
 	app.replicas = 4
@@ -186,6 +208,7 @@ func TestStepDown(t *testing.T) {
 }
 
 func TestMessagePerWorker(t *testing.T) {
+	app.executionRange = ""
 	app.offset = 0
 	app.readyWorkers = 4
 	app.replicas = 4
@@ -206,6 +229,7 @@ func TestMessagePerWorker(t *testing.T) {
 }
 
 func TestCoolDown(t *testing.T) {
+	app.executionRange = ""
 	isCoolDown := app.isCoolDown()
 
 	if isCoolDown != false {
@@ -231,6 +255,7 @@ func TestCoolDown(t *testing.T) {
 }
 
 func TestCreateApp(t *testing.T) {
+	app.executionRange = ""
 	deployment := &v1beta1.Deployment{
 		ObjectMeta: v1.ObjectMeta{
 			Annotations: map[string]string{

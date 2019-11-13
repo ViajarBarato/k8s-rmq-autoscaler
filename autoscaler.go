@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"time"
+	"strings"
 
 	"k8s.io/api/apps/v1beta1"
 	"k8s.io/client-go/kubernetes"
@@ -45,6 +46,8 @@ const (
 	// CoolDownDelay Annotation Key used to specifies how long the autoscaler has to wait before
 	// another downscale operation can be performed after the current one has completed
 	CoolDownDelay = "cooldown-delay"
+	// ExecutionRange  Annotation Key used to specifies the window of execution
+	ExecutionRange = "execution-range"
 
 	missingPropertyError = "deployment: %s has no property `%s` not filled"
 	notAnIntError        = "deployment: %s property `%s` is not an int (ex: 1)"
@@ -76,6 +79,7 @@ type App struct {
 	offset            int32
 	overrideLimits    bool
 	safeUnscale       bool
+	executionRange	  string
 	coolDownDelay     time.Duration
 	createdDate       time.Time
 }
@@ -161,6 +165,8 @@ func (app *App) isCoolDown() bool {
 func (app *App) scale(consumers int32, queueSize int32) int32 {
 	klog.Infof("%s, starting auto-scale decision", app.key)
 
+	currMaxWorkers := app.maxWorkers;
+
 	if app.readyWorkers != app.replicas {
 		klog.Infof("%s is currently unstable, retry later, not enough workers (ready: %d / wanted: %d)", app.key, app.readyWorkers, app.replicas)
 		return 0
@@ -171,10 +177,22 @@ func (app *App) scale(consumers int32, queueSize int32) int32 {
 		return 0
 	}
 
-	if consumers > app.maxWorkers {
-		klog.Infof("%s have to much worker (%d), need to decrease to max (%d)", app.key, consumers, app.maxWorkers)
+	if app.executionRange != "" {
+		hours, _, _ := time.Now().Clock()
+		rangeH := strings.Split(app.executionRange, "-")
+		hourStart, _ := strconv.Atoi(rangeH[0])
+		hourEnd, _ := strconv.Atoi(rangeH[1])
+	
+		if !(hours >= hourStart && hours <= hourEnd) {
+			currMaxWorkers = 0
+			klog.Infof("%s, Out of the run window, from %d to %d", app.key, hourStart, hourEnd)
+		}
+	}
+
+	if consumers > currMaxWorkers {
+		klog.Infof("%s have to much worker (%d), need to decrease to max (%d)", app.key, consumers, currMaxWorkers)
 		if !app.overrideLimits {
-			return app.maxWorkers - app.replicas
+			return currMaxWorkers - app.replicas
 		}
 		klog.Infof("%s limits are override, do nothing", app.key)
 		return 0
@@ -192,8 +210,8 @@ func (app *App) scale(consumers int32, queueSize int32) int32 {
 	scale := int32(math.Ceil(float64(queueSize)/float64(app.messagesPerWorker))) - consumers + app.offset
 
 	if scale > 0 {
-		if consumers == app.maxWorkers {
-			klog.Infof("%s has already the maximum workers (%d), can do anything more (queueSize: %d / consumers: %d)", app.key, app.maxWorkers, queueSize, consumers)
+		if consumers == currMaxWorkers {
+			klog.Infof("%s has already the maximum workers (%d), can do anything more (queueSize: %d / consumers: %d)", app.key, currMaxWorkers, queueSize, consumers)
 			return 0
 		}
 		scaleUp := min(scale, app.steps)
@@ -226,6 +244,7 @@ func createApp(deployment *v1beta1.Deployment, key string) (*App, error) {
 			ref:               deployment,
 			key:               key,
 			queue:             queue,
+			executionRange:    "",
 			replicas:          *deployment.Spec.Replicas,
 			readyWorkers:      deployment.Status.ReadyReplicas,
 			overrideLimits:    false,
@@ -244,6 +263,10 @@ func createApp(deployment *v1beta1.Deployment, key string) (*App, error) {
 		app.vhost = vhost
 	} else {
 		return nil, fmt.Errorf(missingPropertyError, key, Vhost)
+	}
+
+	if executionRange, ok := deployment.ObjectMeta.Annotations[AnnotationPrefix+ExecutionRange]; ok {
+		app.executionRange = executionRange
 	}
 
 	if minWorkers, ok := deployment.ObjectMeta.Annotations[AnnotationPrefix+MinWorkers]; ok {
